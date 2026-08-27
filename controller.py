@@ -3,6 +3,7 @@ import os
 import sys
 import threading
 import time
+import subprocess
 from queue import Empty, Queue
 from typing import Any, Callable, TYPE_CHECKING
 from realtime import PostgresChangesPayload, AsyncRealtimeClient, RealtimeSubscribeStates
@@ -90,6 +91,8 @@ class CarrierController:
         self.view.button_manual_timer.configure(command=self.button_click_manual_timer)
         self.view.button_clear_timer.configure(command=self.button_click_clear_timer)
         self.view.button_post_departure.configure(command=self.button_click_post_departure)
+        self.view.sheet_jumps.MT.bind("<Double-Button-1>", self.double_click_launch_account)
+        self.view.launch_account_button.configure(command=self.button_click_launch_account)
         self.view.button_post_trade_trade.configure(command=self.button_click_post_trade_trade)
         self.view.button_trade_history.configure(command=self.button_click_trade_history)
         self.view.checkbox_filter_ghost_buys_var.trace_add('write', lambda *args: self.settings.set_config('Trade', 'filter_ghost_buys', value=self.view.checkbox_filter_ghost_buys_var.get()))
@@ -900,6 +903,29 @@ class CarrierController:
                 self.view.show_message_box_warning('Warning', f'{carrier_name} ({carrier_callsign}) doesn\'t have a jump plotted')
         else:
             self.view.show_message_box_warning('Warning', 'Please select one carrier and one carrier only!')
+
+    def double_click_launch_account(self, event):
+        self.button_click_launch_account()
+
+    def button_click_launch_account(self):
+        selected_row = self.get_selected_row()
+        
+        # Get cmdr name, then run the command "elite -m edh4 -g alt -a <cmdr_name>"
+
+        if selected_row is not None:
+            carrierID = self.model.sorted_ids_display()[selected_row]
+            if carrierID is not None:
+                cmdr_name = self.model.get_cmdr_name(carrierID)
+                if cmdr_name is not None:
+                    command = f"eliteLaunch.sh -m edh4 -g alt -a \"{cmdr_name}\""
+                    try:
+                        subprocess.Popen(command, shell=True)
+                    except Exception as e:
+                        self.view.show_message_box_warning('Error', f'Error while launching account:\n{e}')
+                else:
+                    self.view.show_message_box_warning('Warning', 'Cmdr name unknown, cannot launch account')
+            else:
+                self.view.show_message_box_warning('Warning', 'Unknown cmdr, cannot launch account')
 
     def button_click_inara_system(self):
         selected_row = self.get_selected_row()

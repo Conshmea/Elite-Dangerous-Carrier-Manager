@@ -136,6 +136,12 @@ class CarrierView:
         # Departure notice
         self.button_post_departure = ttk.Button(self.bottom_bar, text='Post Departure')
         self.button_post_departure.pack(side='left')
+        
+
+        # Launch account button
+        self.launch_account_button = ttk.Button(self.bottom_bar, text='Launch Account')
+        self.launch_account_button.pack(side='left')
+
 
         # Trade tab
         self.sheet_trade = Sheet(self.tab_trade, name='sheet_trade', empty_vertical=0, empty_horizontal=0)
