@@ -5,7 +5,7 @@ import threading
 import time
 import subprocess
 from queue import Empty, Queue
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, Callable, TYPE_CHECKING, LiteralString
 from realtime import PostgresChangesPayload, AsyncRealtimeClient, RealtimeSubscribeStates
 import pyperclip
 import re
@@ -65,6 +65,8 @@ class CarrierController:
         self.notification_settings_carrier = {}
         self.webhook_handler = None
         self.webhook_handler_carrier = {}
+        self._launch_display_names: dict[int, str] = {}
+        self._launch_processes: dict[int, subprocess.Popen] = {}
         self.auth_handler = AuthHandler()
         menu_options: dict[str, list[MenuOption]] = {
             'jumps': [
@@ -437,7 +439,15 @@ class CarrierController:
     
     def update_tables_fast(self, now):
         self.model.update_carriers(now)
-        self.view.update_table_jumps(self.model.get_data(now), self.model.get_rows_pending_decom())
+        data = self.model.get_data(now)
+        for index, (row, carrierID) in enumerate(zip(data, self.model.sorted_ids_display())):
+            if carrierID in self._launch_display_names:
+                data[index] = list[str | LiteralString](row)
+                text = self._launch_display_names[carrierID]
+                if len(text) > 20:
+                    text = text[:17] + '...'
+                data[index][0] = text
+        self.view.update_table_jumps(data, self.model.get_rows_pending_decom())
     
     def update_tables_slow(self, now):
         pending_decom = self.model.get_rows_pending_decom()
@@ -919,13 +929,51 @@ class CarrierController:
                 if cmdr_name is not None:
                     command = f"eliteLaunch.sh -m edh4 -g alt -a \"{cmdr_name}\""
                     try:
-                        subprocess.Popen(command, shell=True)
+                        process = subprocess.Popen(
+                            command,
+                            shell=True,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            bufsize=1,
+                        )
+                        self._launch_processes[carrierID] = process
+                        threading.Thread(
+                            target=self._read_launch_output,
+                            args=(carrierID, process),
+                            daemon=True,
+                        ).start()
                     except Exception as e:
                         self.view.show_message_box_warning('Error', f'Error while launching account:\n{e}')
                 else:
                     self.view.show_message_box_warning('Warning', 'Cmdr name unknown, cannot launch account')
             else:
                 self.view.show_message_box_warning('Warning', 'Unknown cmdr, cannot launch account')
+
+    def _read_launch_output(self, carrierID: int, process: subprocess.Popen):
+        try:
+            if process.stdout is not None:
+                for line in process.stdout:
+                    display_name = line.strip()
+                    if display_name:
+                        self._queue_ui_callback(
+                            self._set_launch_display_name,
+                            carrierID,
+                            process,
+                            display_name,
+                        )
+            process.wait()
+        finally:
+            self._queue_ui_callback(self._clear_launch_display_name, carrierID, process)
+
+    def _set_launch_display_name(self, carrierID: int, process: subprocess.Popen, display_name: str):
+        if self._launch_processes.get(carrierID) is process:
+            self._launch_display_names[carrierID] = display_name
+
+    def _clear_launch_display_name(self, carrierID: int, process: subprocess.Popen):
+        if self._launch_processes.get(carrierID) is process:
+            self._launch_processes.pop(carrierID, None)
+            self._launch_display_names.pop(carrierID, None)
 
     def button_click_inara_system(self):
         selected_row = self.get_selected_row()

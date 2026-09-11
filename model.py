@@ -1062,13 +1062,26 @@ class CarrierModel:
                     return 16  # Assign a specific index for Wine Cellar
             return 999  # Assign a high index for non-N systems
 
+        def get_latest_departure_or_default(carrierID: int) -> datetime:
+            latest_departure = self.get_latest_departure(carrierID)
+            if latest_departure is not None:
+                return latest_departure
+            else:
+                # Return a default datetime far in the past for carriers without a departure time
+                return datetime(year=2000, month=1, day=1).replace(tzinfo=timezone.utc)
+
         # sort by ladder system index, using get_current_system, then sort by get_current_or_destination_system
 
         remaining_ids_sorted_ladder = sorted(
             remaining_ids,
-            key=lambda x: (system_to_ladder_index(self.get_current_system(x)), system_to_ladder_index(self.get_current_or_destination_system(x))),
+            key=lambda x: (
+                system_to_ladder_index(self.get_current_system(x)), 
+                system_to_ladder_index(self.get_current_or_destination_system(x)),
+                get_latest_departure_or_default(x)
+            ),
             reverse=False
         )
+
         #remaining_ids_sorted_time = sorted(remaining_ids, key=lambda x: self.get_time_bought(x) if self.get_time_bought(x) is not None else datetime(year=2020, month=6, day=9).replace(tzinfo=timezone.utc), reverse=False) # Assumes carrier bought at release if no buy event found
 
         return custom_ordered_ids + remaining_ids_sorted_ladder
