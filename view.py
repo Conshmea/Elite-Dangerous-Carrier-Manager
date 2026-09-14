@@ -25,6 +25,9 @@ class CarrierView:
     def __init__(self, root: tk.Tk, window_size:str|None=None, menu_options:dict[str, list[MenuOption]]|None=None):
         self.root = root
         self.menu_options = menu_options
+        self._column_resize_lengths: dict[int, list[list[int]]] = {}  # id(table) -> cell text lengths as of last resize
+        self._last_rows_pending_decomm: dict[int, list[int]|None] = {}  # id(table) -> rows_pending_decomm as of last update
+        self._last_hide_columns: dict[int, list[int]|None] = {}  # id(table) -> hide_columns as of last update
 
         style = ttk.Style(self.root)
         # Removing the focus border around tabs
@@ -343,6 +346,20 @@ class CarrierView:
         sheet.enable_bindings('single_select', 'drag_select', 'column_select', 'row_select', 'arrowkeys', 'copy', 'find', 'ctrl_click_select', 'right_click_popup_menu', 'rc_select')
         sheet.column_width_resize_enabled = False
         sheet.row_height_resize_enabled = False
+        self._debounce_sheet_resize(sheet)
+
+    def _debounce_sheet_resize(self, sheet:Sheet, delay_ms:int=100):
+        # tksheet redraws the whole grid on every single <Configure> event it receives,
+        # which fires repeatedly (uncoalesced) while the window is being dragged/resized.
+        # Rebind with a debounce so the (expensive) redraw only runs once resizing settles.
+        mt = sheet.MT
+        original_handler = mt.window_configured
+        after_id_holder: dict[str, str|None] = {'id': None}
+        def debounced(event=None):
+            if after_id_holder['id'] is not None:
+                mt.after_cancel(after_id_holder['id'])
+            after_id_holder['id'] = mt.after(delay_ms, lambda: original_handler(event))
+        mt.bind('<Configure>', debounced)
 
     def set_font_size(self, font_size:str, font_size_table:str):
         size = font_sizes.get(font_size, font_sizes['normal'])
@@ -388,15 +405,26 @@ class CarrierView:
                 print(f'Warning: No sheet found for menu options with key "{sheet_name}"')
 
     def update_table(self, table:Sheet, data, rows_pending_decomm:list[int]|None=None, hide_columns:list[int]|None=None):
+        key = id(table)
         table.set_sheet_data(data, reset_col_positions=False)
-        table.dehighlight_all(redraw=False)
-        if rows_pending_decomm is not None:
-            table.highlight_rows(rows_pending_decomm, fg='red', redraw=False)
-        table.show_columns(range(table.get_total_columns()), redraw=False, deselect_all=False)
-        if hide_columns is not None:
-            for col in hide_columns:
-                table.hide_columns(col, redraw=False, deselect_all=False)
-        table.set_all_column_widths()
+
+        if self._last_rows_pending_decomm.get(key) != rows_pending_decomm:
+            table.dehighlight_all(redraw=False)
+            if rows_pending_decomm is not None:
+                table.highlight_rows(rows_pending_decomm, fg='red', redraw=False)
+            self._last_rows_pending_decomm[key] = rows_pending_decomm
+
+        if self._last_hide_columns.get(key) != hide_columns:
+            table.show_columns(range(table.get_total_columns()), redraw=False, deselect_all=False)
+            if hide_columns is not None:
+                for col in hide_columns:
+                    table.hide_columns(col, redraw=False, deselect_all=False)
+            self._last_hide_columns[key] = hide_columns
+
+        lengths = [[len(str(cell)) for cell in row] for row in data]
+        if lengths != self._column_resize_lengths.get(key):
+            table.set_all_column_widths()
+            self._column_resize_lengths[key] = lengths
     
     def update_table_jumps(self, data, rows_pending_decomm:list[int]|None=None):
         # Hide route column if no route is set
@@ -757,7 +785,6 @@ class RouteView:
         self.sheet_route['A'].align('center')
         self.sheet_route['C:H'].align('right')
         self.sheet_route['K'].align('right')
-        self.set_data(data)
 
         self.sheet_route.grid(row=0, column=0, columnspan=3, sticky='nswe')
         self.popup.grid_rowconfigure(0, weight=2)
