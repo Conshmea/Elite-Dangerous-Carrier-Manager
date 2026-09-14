@@ -20,6 +20,7 @@ class CarrierView:
     def __init__(self, root: tk.Tk, window_size:str|None=None, menu_options:dict[str, list[MenuOption]]|None=None):
         self.root = root
         self.menu_options = menu_options
+        self._column_resize_lengths: dict[int, list[list[int]]] = {}  # id(table) -> cell text lengths as of last resize
 
         style = ttk.Style(self.root)
         # Removing the focus border around tabs
@@ -384,7 +385,13 @@ class CarrierView:
         table.dehighlight_all(redraw=False)
         if rows_pending_decomm is not None:
             table.highlight_rows(rows_pending_decomm, fg='red', redraw=False)
-        table.set_all_column_widths()
+        # Only recalculate column widths if the data has changed in length since the last resize, to avoid unnecessary recalculation on every update.
+        # Uses text length and not any data change to avoid recalcs for ticking timers
+        key = id(table)
+        lengths = [[len(str(cell)) for cell in row] for row in data]
+        if lengths != self._column_resize_lengths.get(key):
+            table.set_all_column_widths()
+            self._column_resize_lengths[key] = lengths
     
     def update_table_jumps(self, data, rows_pending_decomm:list[int]|None=None):
         self.update_table(self.sheet_jumps, data, rows_pending_decomm)
